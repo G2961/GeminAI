@@ -1,0 +1,2497 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=overlays-content">
+<title>Gemini</title>
+<style>
+    :root {
+        --bg-color: #000000;
+        --text-main: #ffffff;
+        --text-muted: #8e918f;
+        --pill-bg: #1e1f20;
+        --bubble-user: #282a2c;
+        --accent-blue: #a8c7fa;
+    }
+    
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    
+    html, body {
+        height: 100%;
+    }
+
+    body {
+        background-color: var(--bg-color);
+        color: var(--text-main);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    
+    .glow-bg {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 60vh;
+        background: radial-gradient(circle at 50% 100%, rgba(25, 45, 90, 0.6), transparent 70%);
+        filter: blur(60px);
+        z-index: 0;
+        transition: opacity 2s ease-in-out, background 1s ease-in-out;
+        opacity: 1;
+        pointer-events: none;
+    }
+    
+    .glow-bg.generating {
+        background: radial-gradient(circle at 50% 100%, rgba(40, 100, 180, 0.7), rgba(40, 150, 120, 0.3), transparent 75%);
+        animation: pulseGlow 3s infinite alternate ease-in-out;
+        opacity: 1;
+    }
+    
+    .glow-bg.finished {
+        /* The fade is deliberately a CSS transition, not a replacement
+           animation. The JS forces a layout frame before adding this class,
+           guaranteeing a real 2-second opacity transition from the visible
+           glow to transparent instead of a snap. */
+        background: radial-gradient(circle at 50% 100%, rgba(40, 100, 180, 0.7), rgba(40, 150, 120, 0.3), transparent 75%);
+        animation: none !important;
+        opacity: 0;
+        transition: opacity 2s ease-in-out;
+    }
+    
+    @keyframes pulseGlow {
+        0% { transform: scale(1); opacity: 0.8; }
+        100% { transform: scale(1.1); opacity: 1; }
+    }
+
+    @keyframes glowFadeOut {
+        0% {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+        100% {
+            opacity: 0;
+            transform: scale(1.1);
+        }
+    }
+
+    header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        z-index: 10;
+        position: relative;
+        flex-shrink: 0;
+    }
+    
+    .header-left {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+    
+    .model-selector {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 18px;
+        font-weight: 400;
+        color: #e3e3e3;
+    }
+    
+    .model-selector.model-open {
+        z-index: 1200;
+    }
+
+    .model-menu {
+        position: fixed;
+        top: 58px;
+        left: 12px;
+        min-width: 230px;
+        max-width: min(320px, calc(100vw - 24px));
+        max-height: min(420px, calc(100vh - 90px));
+        overflow-y: auto;
+        padding: 8px;
+        background: #202124;
+        border: 1px solid #3c4043;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.45);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-6px) scale(.98);
+        transform-origin: top left;
+        transition: opacity .16s ease, transform .16s ease, visibility .16s;
+        z-index: 1200;
+    }
+    .model-menu.open {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0) scale(1);
+    }
+    .model-menu.empty::after {
+        content: 'Сначала загрузите модели в настройках';
+        display: block;
+        padding: 14px 12px;
+        color: #9aa0a6;
+        font-size: 14px;
+    }
+    .model-option {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 11px 12px;
+        border: 0;
+        border-radius: 12px;
+        background: transparent;
+        color: #e8eaed;
+        text-align: left;
+        font-size: 15px;
+        cursor: pointer;
+        transition: background .12s ease;
+    }
+    .model-option:hover, .model-option:active { background: #303134; }
+    .model-option.selected { background: #3c4043; }
+    .model-option .model-check {
+        margin-left: auto;
+        color: #a8c7fa;
+        font-size: 18px;
+        opacity: 0;
+    }
+    .model-option.selected .model-check { opacity: 1; }
+
+    .icon {
+        width: 24px;
+        height: 24px;
+        fill: currentColor;
+    }
+
+    main {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: center;
+        gap: 24px;
+        z-index: 10;
+        position: relative;
+    }
+
+    .welcome-screen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        gap: 20px;
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 50vh;
+        transform: translate3d(0, calc(-50% - var(--welcome-keyboard-shift, 0px)), 0);
+        z-index: 20;
+        pointer-events: none;
+        opacity: 1;
+        transition: opacity 0.35s ease, transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+        margin: 0;
+    }
+
+    .welcome-screen.hidden {
+        opacity: 0;
+        transform: translate3d(0, calc(-50% - var(--welcome-keyboard-shift, 0px) - 14px), 0);
+        pointer-events: none;
+        visibility: hidden;
+    }
+
+    .gemini-sparkle {
+        width: 48px;
+        height: 48px;
+    }
+
+    .welcome-title {
+        font-size: 32px;
+        font-weight: 400;
+        color: #ffffff;
+        letter-spacing: -0.5px;
+    }
+    
+    .message {
+        display: flex;
+        flex-direction: column;
+        max-width: 90%;
+        width: 100%;
+        opacity: 0;
+    }
+    
+    .message.user {
+        align-self: flex-end;
+        background-color: var(--bubble-user);
+        padding: 12px 18px;
+        border-radius: 24px;
+        width: auto;
+        max-width: 85%;
+        animation: slideUpFade 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    }
+    
+    .message.ai {
+        align-self: flex-start;
+        animation: fadeIn 0.5s ease forwards;
+    }
+    
+    .ai-content {
+        font-size: 16px;
+        line-height: 1.5;
+        min-width: 0;
+    }
+
+    /* Markdown code blocks */
+    .ai-content .code-block {
+        position: relative;
+        margin: 14px 0;
+        border: 1px solid rgba(255,255,255,.10);
+        border-radius: 14px;
+        overflow: hidden;
+        background: #15171b;
+        max-width: 100%;
+    }
+
+    .ai-content .code-block-header {
+        height: 38px;
+        padding: 0 10px 0 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: rgba(255,255,255,.035);
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        color: #9da3ad;
+        font: 12px/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        box-sizing: border-box;
+    }
+
+    .ai-content .code-language {
+        text-transform: lowercase;
+        opacity: .9;
+    }
+
+    .ai-content .code-copy {
+        border: 0;
+        border-radius: 8px;
+        padding: 6px 9px;
+        background: transparent;
+        color: #b7bdc7;
+        font: 12px/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        cursor: pointer;
+    }
+
+    .ai-content .code-copy:hover {
+        background: rgba(255,255,255,.08);
+        color: #fff;
+    }
+
+    .ai-content pre.code-pre {
+        margin: 0;
+        padding: 14px 15px 16px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: pre;
+    }
+
+    .ai-content pre.code-pre code {
+        display: block;
+        color: #e7e9ed;
+        font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        tab-size: 4;
+    }
+
+    .ai-content code.inline-code {
+        padding: 2px 5px;
+        border-radius: 5px;
+        background: rgba(255,255,255,.08);
+        color: #e8ebf0;
+        font: .9em ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    
+    @keyframes slideUpFade {
+        0% { opacity: 0; transform: translateY(20px); }
+        100% { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes fadeIn {
+        0% { opacity: 0; }
+        100% { opacity: 1; }
+    }
+
+    .loading-dots {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        margin-top: 12px;
+        opacity: 1;
+        transition: opacity 0.5s ease;
+        align-self: flex-start;
+    }
+    
+    .loading-dots.hiding {
+        opacity: 0;
+    }
+    
+    .dot {
+        width: 6px;
+        height: 6px;
+        background-color: var(--accent-blue);
+        border-radius: 50%;
+        animation: bounce 1.4s infinite ease-in-out both;
+    }
+    
+    .dot:nth-child(1) { animation-delay: -0.32s; }
+    .dot:nth-child(2) { animation-delay: -0.16s; }
+    
+    @keyframes bounce {
+        0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+        40% { transform: translateY(-6px); opacity: 1; }
+    }
+    
+    .ai-actions svg {
+        width: 20px;
+        height: 20px;
+        fill: currentColor;
+        cursor: pointer;
+    }
+
+    footer {
+        padding: 10px 16px 24px;
+        z-index: 10;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    
+    .input-wrapper {
+        width: 100%;
+        max-width: 700px;
+    }
+    
+    .input-pill {
+        display: flex;
+        align-items: flex-end;
+        background-color: var(--pill-bg);
+        border-radius: 28px;
+        padding: 8px 8px 8px 16px;
+        gap: 8px;
+        width: 100%;
+        min-height: 52px;
+    }
+    
+    .input-pill textarea {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: var(--text-main);
+        font-size: 16px;
+        outline: none;
+        resize: none;
+        font-family: inherit;
+        padding: 8px 0;
+        margin: 0;
+        line-height: 22px;
+        max-height: 120px;
+        overflow-y: auto;
+    }
+    
+    .input-pill textarea::placeholder {
+        color: var(--text-muted);
+    }
+    
+    .attachment-menu {
+        position: fixed;
+        z-index: 4200;
+        width: 190px;
+        padding: 6px;
+        background: #242528;
+        border: 1px solid #3a3b3f;
+        border-radius: 18px;
+        box-shadow: 0 12px 40px rgba(0,0,0,.5);
+        opacity: 0;
+        transform: translateY(6px) scale(.97);
+        pointer-events: none;
+        transition: opacity .16s ease, transform .16s ease;
+    }
+    .attachment-menu.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+    .attachment-option {
+        width: 100%; min-height: 46px; padding: 0 12px; border: 0; background: transparent;
+        color: #f1f3f4; border-radius: 13px; display:flex; align-items:center; gap:12px;
+        font: inherit; text-align:left; cursor:pointer;
+    }
+    .attachment-option:hover, .attachment-option:active { background:#303134; }
+    .attachment-option svg { width:22px; height:22px; fill:currentColor; color:#a8c7fa; flex:none; }
+    .pending-attachments { display:flex; gap:7px; flex-wrap:wrap; margin:0 0 8px 4px; }
+    .attachment-chip { display:flex; align-items:center; gap:7px; max-width:230px; padding:6px 9px; border-radius:12px; background:#242528; color:#e8eaed; font-size:12px; }
+    .attachment-chip img { width:28px; height:28px; object-fit:cover; border-radius:7px; }
+    .attachment-chip .remove { border:0; background:transparent; color:#9aa0a6; cursor:pointer; font-size:18px; line-height:1; padding:0 2px; }
+
+
+    /* Photo + caption message layout */
+    .message.user.attachment-message {
+        background: transparent;
+        padding: 0;
+        border-radius: 0;
+        max-width: 85%;
+        align-items: flex-end;
+        gap: 7px;
+    }
+    .message.user.attachment-message .message-attachments {
+        margin: 0;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 7px;
+    }
+    .message.user.attachment-message .message-attachment-image {
+        width: 190px;
+        height: 190px;
+        max-width: 190px;
+        max-height: 190px;
+        object-fit: cover;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    .message-caption {
+        align-self: flex-end;
+        max-width: 100%;
+        box-sizing: border-box;
+        padding: 10px 15px;
+        border-radius: 20px;
+        background: var(--bubble-user);
+        color: #e8eaed;
+        text-align: right;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+    .message.user.attachment-message:has(.message-attachment-file) .message-attachments {
+        align-items: flex-end;
+    }
+
+    /* Real image attachments inside sent messages */
+    .message-attachments {
+        display:flex;
+        flex-wrap:wrap;
+        gap:8px;
+        margin-top:8px;
+    }
+    .message-attachment-image {
+        display:block;
+        width:220px;
+        max-width:100%;
+        max-height:280px;
+        object-fit:cover;
+        border-radius:16px;
+        border:1px solid rgba(255,255,255,.10);
+        cursor:zoom-in;
+        background:#202124;
+        transition:transform .18s ease, filter .18s ease;
+    }
+    .message-attachment-image:hover { filter:brightness(1.05); }
+    .message-attachment-file {
+        display:flex;
+        align-items:center;
+        gap:11px;
+        min-width:0;
+        max-width:min(360px, 100%);
+        padding:10px 12px;
+        border:1px solid #3a3b3f;
+        border-radius:14px;
+        background:#242528;
+        color:#e8eaed;
+        font-size:13px;
+        box-sizing:border-box;
+    }
+    .message-attachment-file .attachment-file-icon {
+        width:34px;
+        height:34px;
+        min-width:34px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:10px;
+        background:#303134;
+        color:#a8c7fa;
+    }
+    .message-attachment-file .attachment-file-icon svg {
+        width:21px;
+        height:21px;
+        fill:none;
+        stroke:currentColor;
+        stroke-width:1.9;
+        stroke-linecap:round;
+        stroke-linejoin:round;
+    }
+    .message-attachment-file .attachment-file-info {
+        min-width:0;
+        display:flex;
+        flex-direction:column;
+        gap:2px;
+    }
+    .message-attachment-file .attachment-file-name {
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        font-weight:500;
+        line-height:1.25;
+    }
+    .message-attachment-file .attachment-file-meta {
+        color:#9aa0a6;
+        font-size:11px;
+        line-height:1.2;
+    }
+    .message.user.attachment-message .message-attachment-file {
+        align-self:flex-end;
+    }
+    .image-lightbox {
+        position:fixed;
+        inset:0;
+        z-index:6000;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:24px;
+        background:rgba(0,0,0,.82);
+        backdrop-filter:blur(7px);
+        opacity:0;
+        visibility:hidden;
+        pointer-events:none;
+        transition:opacity .20s ease, visibility .20s ease;
+    }
+    .image-lightbox.open { opacity:1; visibility:visible; pointer-events:auto; }
+    .image-lightbox img {
+        max-width:94vw;
+        max-height:90vh;
+        object-fit:contain;
+        border-radius:18px;
+        box-shadow:0 20px 70px rgba(0,0,0,.55);
+        transform:scale(.96);
+        transition:transform .20s ease;
+        touch-action:none;
+        user-select:none;
+        -webkit-user-drag:none;
+    }
+    .image-lightbox.open img { transform:scale(1); }
+    .lightbox-close {
+        position:absolute;
+        top:18px;
+        right:18px;
+        width:44px;
+        height:44px;
+        border:1px solid #3a3b3f;
+        border-radius:50%;
+        background:#242528;
+        color:#fff;
+        font-size:25px;
+        line-height:1;
+        cursor:pointer;
+    }
+
+
+    .action-btn {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: none;
+        background: transparent;
+        color: var(--text-muted);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        align-self: flex-end;
+    }
+
+    .action-btn svg {
+        width: 24px;
+        height: 24px;
+        fill: currentColor;
+    }
+
+    .send-btn {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: none;
+        background-color: #0b57d0;
+        color: white;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        cursor: pointer;
+        position: relative;
+        flex-shrink: 0;
+        align-self: flex-end;
+        overflow: hidden;
+    }
+
+    .send-btn svg {
+        width: 22px;
+        height: 22px;
+        fill: currentColor;
+        position: absolute;
+        opacity: 0;
+        transform: scale(0.8);
+        transition: opacity 0.2s, transform 0.2s;
+        pointer-events: none;
+    }
+
+    .send-btn .icon-send { opacity: 1; transform: scale(1); }
+    .send-btn.state-generating .icon-send { opacity: 0; transform: scale(0.8); }
+    .send-btn.state-generating .icon-stop { opacity: 1; transform: scale(1); }
+
+    /* ===== MOBILE VIEWPORT / KEYBOARD LOCK =====
+       The document itself NEVER scrolls. Header + welcome are independent
+       viewport layers. Only #chat-container scrolls.
+
+       IMPORTANT: the keyboard is handled as an overlay. We do not resize the
+       whole app and we do not translate the header/welcome when the textarea
+       receives focus. The composer alone is lifted above the IME. */
+    :root {
+        --app-height: 100vh;
+        --header-height: 56px;
+        --composer-height: 76px;
+        --keyboard-height: 0px;
+        --welcome-keyboard-shift: 0px;
+        --composer-bottom: 0px;
+        --footer-keyboard-shift: 0px;
+    }
+
+    html {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+
+    body {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100vh;
+        min-height: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: auto;
+    }
+
+    /* HEADER: hard-pinned to the browser viewport. NEVER use visualViewport
+       offsets here. Chrome's keyboard viewport is allowed to change, but the
+       header must remain at exactly the same screen coordinate. */
+    header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: var(--header-height);
+        min-height: var(--header-height);
+        padding: 16px 20px;
+        z-index: 1000;
+        flex: none;
+        background: #000000;
+        transform: none;
+        will-change: auto;
+    }
+
+    /* Welcome is OUTSIDE #chat-container, so chat scrolling cannot move it.
+       Its center is based on the full app viewport, not the keyboard viewport.
+       Therefore focusing the textarea does not make it jump upward. */
+    body > .welcome-screen {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 50%;
+        width: 100%;
+        height: auto;
+        margin: 0;
+        padding: 0 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        text-align: center;
+        transform: translate3d(0, calc(-50% - var(--welcome-keyboard-shift, 0px)), 0);
+        z-index: 20;
+        pointer-events: none;
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.35s ease, transform 0.35s ease;
+    }
+
+    body > .welcome-screen.hidden {
+        opacity: 0;
+        transform: translate3d(0, calc(-50% - var(--welcome-keyboard-shift, 0px) - 14px), 0);
+        visibility: hidden;
+    }
+
+    main#chat-container {
+        position: fixed;
+        top: var(--header-height);
+        left: 0;
+        right: 0;
+        bottom: calc(var(--composer-height) + var(--keyboard-height, 0px));
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-y: contain;
+        padding: 20px;
+        z-index: 10;
+    }
+
+    /* Composer has NO outer card/background. Only .input-pill is visible. */
+    footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: auto;
+        min-height: 0;
+        padding: 10px 16px 24px;
+        z-index: 1000;
+        flex: none;
+        background: transparent;
+        transform: translate3d(0, var(--footer-keyboard-shift, 0px), 0);
+        will-change: transform;
+        transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .input-wrapper {
+        width: 100%;
+        max-width: 700px;
+    }
+
+    header::after,
+    footer::before {
+        display: none;
+    }
+
+    input, textarea, button {
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Composer: only the rounded input pill is visible; no outer rectangle. */
+    footer {
+        background: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+    }
+    footer::before,
+    footer::after {
+        content: none !important;
+        display: none !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        border: 0 !important;
+    }
+
+    @media (max-width: 700px) {
+        header {
+            padding-left: 20px;
+            padding-right: 20px;
+        }
+
+        main#chat-container {
+            padding-left: 20px;
+            padding-right: 20px;
+        }
+    }
+
+
+
+    /* ===== CHAT DRAWER ===== */
+    .drawer-backdrop {
+        position: fixed; inset: 0; background: rgba(0,0,0,.52);
+        opacity: 0; visibility: hidden; pointer-events: none;
+        transition: opacity .22s ease, visibility .22s ease;
+        z-index: 4000;
+    }
+    .drawer-backdrop.open { opacity: 1; visibility: visible; pointer-events: auto; }
+    .chat-drawer {
+        position: fixed; top: 0; bottom: 0; left: 0;
+        width: min(340px, 88vw);
+        background: #18191a; border-right: 1px solid #303134;
+        box-shadow: 18px 0 50px rgba(0,0,0,.42);
+        transform: translateX(-102%);
+        transition: transform .26s cubic-bezier(.22,1,.36,1);
+        z-index: 4001; display:flex; flex-direction:column;
+        padding: 12px;
+    }
+    .chat-drawer.open { transform: translateX(0); }
+    .drawer-top { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+    .drawer-close {
+        width:42px;height:42px;border:0;border-radius:50%;background:transparent;color:#e8eaed;
+        display:grid;place-items:center;cursor:pointer;
+    }
+    .drawer-close:active { background:#303134; }
+    .drawer-title { font-size:20px; font-weight:500; margin-left:4px; }
+    .new-chat-action {
+        width:100%; min-height:48px; border:0; border-radius:16px; background:#2a2b2d;
+        color:#fff; display:flex; align-items:center; gap:12px; padding:0 15px;
+        font:inherit; cursor:pointer; text-align:left; transition:background .15s ease;
+        margin-bottom:12px;
+    }
+    .new-chat-action:hover,.new-chat-action:active { background:#343538; }
+    .new-chat-action svg { width:22px;height:22px;fill:currentColor; }
+    .history-label { color:#9aa0a6; font-size:12px; font-weight:600; padding:8px 12px; text-transform:uppercase; letter-spacing:.5px; }
+    .chat-history { flex:1; min-height:0; overflow-y:auto; padding:2px 0 10px; }
+    .history-empty { color:#777b80; font-size:14px; line-height:1.45; padding:18px 12px; }
+    .history-item {
+        width:100%; border:0; background:transparent; color:#e8eaed; border-radius:14px;
+        padding:11px 12px; display:flex; align-items:center; gap:10px; text-align:left;
+        cursor:pointer; font:inherit; margin-bottom:2px; transition:background .14s ease;
+    }
+    .history-item:hover,.history-item:active { background:#2b2c2e; }
+    .history-item.active { background:#303134; }
+    .history-icon { width:20px;height:20px;flex:0 0 20px;fill:#aeb3b8; }
+    .history-text { min-width:0; flex:1; }
+    .history-name { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .history-meta { color:#777b80; font-size:11px; margin-top:3px; }
+    .history-delete {
+        width:32px;height:32px;border:0;border-radius:50%;background:transparent;color:#9aa0a6;
+        display:grid;place-items:center;opacity:0;cursor:pointer;flex:0 0 32px;
+    }
+    .history-item:hover .history-delete,.history-item:focus-within .history-delete { opacity:1; }
+    .history-delete:active { background:#3a3b3d;color:#fff; }
+    .drawer-footer { border-top:1px solid #2d2e30; padding-top:8px; }
+    .drawer-settings {
+        width:100%; border:0; background:transparent; color:#e8eaed; border-radius:14px;
+        min-height:46px; padding:0 12px; display:flex;align-items:center;gap:12px;
+        font:inherit;cursor:pointer;text-align:left;
+    }
+    .drawer-settings:hover,.drawer-settings:active { background:#2b2c2e; }
+    .drawer-settings svg { width:21px;height:21px;fill:currentColor; }
+
+    /* Material-style API dialog */
+    .settings-overlay { align-items:flex-end; justify-content:flex-end; padding:16px; }
+    .settings-overlay.open { animation: settingsBackdropIn .18s ease both; }
+    .settings-card {
+        width:min(420px, calc(100vw - 32px)); max-height:min(760px, calc(100vh - 32px));
+        border-radius:22px; padding:20px; background:#202124; border:1px solid #3c4043;
+        box-shadow:0 18px 60px rgba(0,0,0,.55);
+        animation: settingsCardIn .24s cubic-bezier(.22,1,.36,1) both;
+    }
+    .settings-close { background:#2d2e30; font-size:24px; }
+    .settings-btn { min-height:44px; border-radius:14px; }
+    @keyframes settingsBackdropIn { from{opacity:0} to{opacity:1} }
+    @keyframes settingsCardIn { from{opacity:0;transform:translateY(14px) scale(.98)} to{opacity:1;transform:translateY(0) scale(1)} }
+
+    /* ===== API SETTINGS ===== */
+    .hamburger-btn, .new-chat-btn {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+    }
+    .hamburger-btn { width: 24px; height: 24px; }
+    .settings-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.68);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 5000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+    .settings-overlay.open { display: flex; }
+    .settings-card {
+        width: min(520px, 100%);
+        max-height: min(760px, calc(100vh - 40px));
+        overflow-y: auto;
+        background: #1e1f20;
+        border: 1px solid #303134;
+        border-radius: 24px;
+        padding: 22px;
+        box-shadow: 0 24px 80px rgba(0,0,0,.55);
+    }
+    .settings-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
+    .settings-title { font-size:22px; font-weight:500; }
+    .settings-close { width:38px; height:38px; border:0; border-radius:50%; background:transparent; color:#fff; font-size:28px; cursor:pointer; }
+    .settings-label { display:block; color:#b8b8b8; font-size:13px; margin:15px 0 7px; }
+    .format-switch { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:4px; background:#131415; border:1px solid #303134; border-radius:14px; }
+    .format-option { position:relative; }
+    .format-option input { position:absolute; opacity:0; pointer-events:none; }
+    .format-option label { display:flex; align-items:center; justify-content:center; min-height:40px; border-radius:10px; color:#9aa0a6; font-size:14px; cursor:pointer; transition:background .18s ease,color .18s ease; }
+    .format-option input:checked + label { background:#303134; color:#fff; }
+    .endpoint-hint { margin-top:8px; color:#777b80; font-size:12px; line-height:1.4; }
+
+    .settings-input, .settings-test-input {
+        width:100%; border:1px solid #3c4043; outline:none; border-radius:14px;
+        background:#131415; color:#fff; padding:13px 14px; font:inherit;
+    }
+    .settings-input:focus, .settings-test-input:focus { border-color:#8ab4f8; }
+    .settings-row { display:flex; gap:10px; margin-top:16px; }
+    .settings-btn {
+        border:0; border-radius:14px; padding:12px 16px; font:inherit; cursor:pointer;
+        background:#a8c7fa; color:#0b0c0d; font-weight:600;
+    }
+    .settings-btn.secondary { background:#303134; color:#fff; }
+    .settings-btn:disabled { opacity:.5; cursor:default; }
+    .api-status { margin-top:12px; min-height:20px; color:#9aa0a6; font-size:13px; white-space:pre-wrap; }
+    .api-status.ok { color:#81c995; }
+    .api-status.error { color:#f28b82; }
+    .context-meter { margin-top:10px; padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px; background:rgba(255,255,255,.035); color:#9aa0a6; font-size:12px; line-height:1.45; }
+    .context-meter strong { color:#e8eaed; font-weight:600; }
+    .context-meter-bar { margin-top:7px; height:4px; border-radius:999px; background:#303134; overflow:hidden; }
+    .context-meter-fill { height:100%; width:0%; border-radius:inherit; background:#8ab4f8; transition:width .2s ease; }
+    .test-box { margin-top:22px; padding-top:18px; border-top:1px solid #303134; }
+    .test-answer {
+        margin-top:12px; padding:13px 14px; border-radius:14px; background:#131415;
+        color:#e8eaed; font-size:14px; line-height:1.5; white-space:pre-wrap; display:none;
+    }
+    .test-answer.show { display:block; }
+    .settings-note { margin-top:12px; color:#777b80; font-size:12px; line-height:1.45; }
+    .model-pill-status { font-size:12px; color:#777b80; margin-top:7px; }
+
+
+</style>
+</head>
+<body>
+
+    <div class="glow-bg" id="bg-glow"></div>
+
+    <header>
+        <div class="header-left">
+            <button class="hamburger-btn" id="hamburger-btn" title="Меню" aria-label="Открыть меню">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+            </button>
+            <div class="model-selector" id="model-selector" role="button" tabindex="0" aria-haspopup="listbox" aria-expanded="false">
+                <span id="model-label">Gemini Pro</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+            </div>
+            <div class="model-menu" id="model-menu" role="listbox" aria-label="Выбор модели"></div>
+        </div>
+        <button class="hamburger-btn" id="settings-btn" title="Настройки API" aria-label="Открыть настройки API">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65-2-3.46-2.49 1a7.52 7.52 0 0 0-1.69-.98L15 3h-4l-.36 2.53c-.61.25-1.18.58-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.08.65-.08.98s.03.66.08.98l-2.11 1.65 2 3.46 2.49-1c.51.4 1.08.73 1.69.98L11 21h4l.36-2.53c.61-.25 1.18-.58 1.69-.98l2.49 1 2-3.46-2.11-1.65zM13 15.5A3.5 3.5 0 1 1 13 8a3.5 3.5 0 0 1 0 7.5z"/></svg>
+        </button>
+    </header>
+
+    <div class="drawer-backdrop" id="drawer-backdrop"></div>
+    <aside class="chat-drawer" id="chat-drawer" aria-label="История чатов">
+        <div class="drawer-top">
+            <button class="drawer-close" id="drawer-close" aria-label="Закрыть меню">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.41 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29 10.59 10.59 16.89 4.29z"/></svg>
+            </button>
+            <div class="drawer-title">Чаты</div>
+        </div>
+        <button class="new-chat-action" id="new-chat-action">
+            <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+            <span>Новый чат</span>
+        </button>
+        <div class="history-label">История</div>
+        <div class="chat-history" id="chat-history"></div>
+        <div class="drawer-footer">
+            <button class="drawer-settings" id="drawer-settings">
+                <svg viewBox="0 0 24 24"><path d="M19.43 12.98c.04-.32.07-.65-.07-.98.04-.33.07-.66.07-.98l2.11-1.65-2-3.46-2.49 1a7.52 7.52 0 0 0-1.69-.98L15 3h-4l-.36 2.53c-.61.25-1.18.58-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.08.65-.08.98s.03.66.08.98l-2.11 1.65 2 3.46 2.49-1c.51-.4 1.08-.73 1.69-.98L11 21h4l.36-2.53c.61-.25 1.18-.58 1.69-.98l2.49 1 2-3.46-2.11-1.65zM13 15.5A3.5 3.5 0 1 1 13 8a3.5 3.5 0 0 1 0 7.5z"/></svg>
+                <span>Настройки API</span>
+            </button>
+        </div>
+    </aside>
+
+    <div class="welcome-screen" id="welcome-screen">
+        <!-- Welcome is outside the scrollable chat container on purpose.
+             It is a viewport layer and can never be moved by chat scrolling. -->
+        <svg class="gemini-sparkle" viewBox="0 0 24 24">
+            <path fill="url(#gemini-gradient)" d="M12,0 C12,6.5 17.5,12 24,12 C17.5,12 12,17.5 12,24 C12,17.5 6.5,12 0,12 C6.5,12 12,6.5 12,0 Z"/>
+            <defs>
+                <linearGradient id="gemini-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#4285F4" />
+                    <stop offset="35%" stop-color="#9b72cb" />
+                    <stop offset="70%" stop-color="#d96570" />
+                    <stop offset="100%" stop-color="#f4b400" />
+                </linearGradient>
+            </defs>
+        </svg>
+        <div class="welcome-title">Чем я могу вам помочь?</div>
+    </div>
+
+    <main id="chat-container">
+        <div class="loading-dots" id="loading-dots">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+        </div>
+    </main>
+
+    <div class="settings-overlay" id="settingsOverlay" aria-hidden="true">
+        <div class="settings-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+            <div class="settings-head">
+                <div class="settings-title" id="settingsTitle">Настройки API</div>
+                <button class="settings-close" id="settingsClose" aria-label="Закрыть">×</button>
+            </div>
+
+            <label class="settings-label">Формат API</label>
+            <div class="format-switch" id="formatSwitch">
+                <div class="format-option">
+                    <input type="radio" name="apiFormat" id="formatOpenAI" value="openai" checked>
+                    <label for="formatOpenAI">OpenAI</label>
+                </div>
+                <div class="format-option">
+                    <input type="radio" name="apiFormat" id="formatAnthropic" value="anthropic">
+                    <label for="formatAnthropic">Anthropic</label>
+                </div>
+            </div>
+            <div class="endpoint-hint" id="endpointHint">Запросы: /v1/models и /v1/chat/completions</div>
+
+            <label class="settings-label" for="baseUrl">Base URL</label>
+            <input class="settings-input" id="baseUrl" type="url" autocomplete="url" placeholder="https://freeinference.org">
+
+            <label class="settings-label" for="apiKey">API Key</label>
+            <input class="settings-input" id="apiKey" type="password" autocomplete="off" placeholder="your-api-key">
+
+            <label class="settings-label" for="manualModel">Модель</label>
+            <input class="settings-input" id="manualModel" type="text" autocomplete="off" placeholder="glm-5.1">
+            <div class="model-pill-status" id="modelsStatus">Модели ещё не загружены</div>
+
+            <div class="settings-row">
+                <button class="settings-btn" id="saveSettings">Сохранить</button>
+                <button class="settings-btn secondary" id="refreshModels">Загрузить модели</button>
+            </div>
+            <div class="api-status" id="apiState"></div>
+            <div class="context-meter" id="contextMeter">Контекст: <strong id="contextMeterText">—</strong><div class="context-meter-bar"><div class="context-meter-fill" id="contextMeterFill"></div></div></div>
+
+            <div class="test-box">
+                <label class="settings-label" for="testPrompt">Тестовый запрос</label>
+                <input class="settings-test-input" id="testPrompt" value="Привет" autocomplete="off">
+                <div class="settings-row">
+                    <button class="settings-btn" id="testApi">Проверить API</button>
+                </div>
+                <div class="test-answer" id="testAnswer"></div>
+                <div class="settings-note" id="settingsNote">OpenAI-compatible: POST /v1/chat/completions с Authorization: Bearer.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="attachment-menu" id="attachment-menu" role="menu" aria-hidden="true">
+        <button class="attachment-option" id="pick-photo" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+            <span>Фото</span>
+        </button>
+        <button class="attachment-option" id="pick-file" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm1 7V3.5L18.5 9H15z"/></svg>
+            <span>Файл</span>
+        </button>
+    </div>
+    <div class="image-lightbox" id="image-lightbox" aria-hidden="true">
+        <button class="lightbox-close" id="lightbox-close" type="button" aria-label="Закрыть">×</button>
+        <img id="lightbox-image" alt="Просмотр изображения">
+    </div>
+
+    <input id="photo-input" type="file" accept="image/*" multiple hidden>
+    <input id="file-input" type="file" multiple hidden>
+
+    <footer>
+        <div class="input-wrapper">
+            <div class="pending-attachments" id="pending-attachments"></div>
+            <div class="input-pill">
+                <button class="action-btn" id="attach-btn" title="Прикрепить" aria-label="Прикрепить файл или фото" aria-expanded="false">
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                </button>
+                <textarea id="chat-input" placeholder="Спросить Gemini" autocomplete="off" rows="1"></textarea>
+                
+                <button class="action-btn" id="mic-btn" title="Голосовой ввод">
+                    <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                </button>
+
+                <button class="send-btn" id="main-action-btn" title="Отправить">
+                    <svg class="icon-send" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.59 5.58L20 12l-8-8-8 8z"/></svg>
+                    <svg class="icon-stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                </button>
+            </div>
+        </div>
+    </footer>
+
+    <script type="module">
+        import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+        // Tauri HTTP plugin: route API traffic through Rust/reqwest instead of WebView fetch.
+        window.fetch = tauriFetch;
+
+        const input = document.getElementById('chat-input');
+        const attachBtn = document.getElementById('attach-btn');
+        const attachmentMenu = document.getElementById('attachment-menu');
+        const photoInput = document.getElementById('photo-input');
+        const fileInput = document.getElementById('file-input');
+        const pendingAttachmentsEl = document.getElementById('pending-attachments');
+        const imageLightbox = document.getElementById('image-lightbox');
+        const lightboxImage = document.getElementById('lightbox-image');
+        const lightboxClose = document.getElementById('lightbox-close');
+        let pendingAttachments = [];
+        const actionBtn = document.getElementById('main-action-btn');
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const chatContainer = document.getElementById('chat-container');
+
+        // Code-block copy uses event delegation because AI messages are re-rendered
+        // while the answer is being displayed.
+        chatContainer.addEventListener('click', async (event) => {
+            const button = event.target.closest('.code-copy');
+            if (!button) return;
+            const code = button.closest('.code-block')?.querySelector('code')?.textContent || '';
+            try {
+                await navigator.clipboard.writeText(code);
+                const previous = button.textContent;
+                button.textContent = 'Скопировано';
+                setTimeout(() => { button.textContent = previous; }, 1200);
+            } catch (_) {
+                // Fallback for older Android WebViews/file:// pages.
+                const area = document.createElement('textarea');
+                area.value = code;
+                area.style.position = 'fixed';
+                area.style.opacity = '0';
+                document.body.appendChild(area);
+                area.focus();
+                area.select();
+                try { document.execCommand('copy'); } catch (_) {}
+                area.remove();
+                const previous = button.textContent;
+                button.textContent = 'Скопировано';
+                setTimeout(() => { button.textContent = previous; }, 1200);
+            }
+        });
+
+        const bgGlow = document.getElementById('bg-glow');
+        const loadingDots = document.getElementById('loading-dots');
+        
+        let currentState = 'idle';
+        let isFirstMessage = true;
+
+        const hamburgerBtn = document.getElementById('hamburger-btn');
+        const settingsBtn = document.getElementById('settings-btn');
+        const drawer = document.getElementById('chat-drawer');
+        const drawerBackdrop = document.getElementById('drawer-backdrop');
+        const drawerClose = document.getElementById('drawer-close');
+        const newChatAction = document.getElementById('new-chat-action');
+        const drawerSettings = document.getElementById('drawer-settings');
+        const chatHistory = document.getElementById('chat-history');
+        const settingsOverlay = document.getElementById('settingsOverlay');
+        const settingsClose = document.getElementById('settingsClose');
+        const baseUrlInput = document.getElementById('baseUrl');
+        const apiKeyInput = document.getElementById('apiKey');
+        const manualModelInput = document.getElementById('manualModel');
+        const saveSettingsBtn = document.getElementById('saveSettings');
+        const refreshModelsBtn = document.getElementById('refreshModels');
+        const testApiBtn = document.getElementById('testApi');
+        const testPromptInput = document.getElementById('testPrompt');
+        const apiState = document.getElementById('apiState');
+        const testAnswer = document.getElementById('testAnswer');
+        const modelsStatus = document.getElementById('modelsStatus');
+        const modelSelector = document.getElementById('model-selector');
+        const modelLabel = document.getElementById('model-label');
+        const modelMenu = document.getElementById('model-menu');
+        const formatOpenAI = document.getElementById('formatOpenAI');
+        const formatAnthropic = document.getElementById('formatAnthropic');
+        const endpointHint = document.getElementById('endpointHint');
+        const settingsNote = document.getElementById('settingsNote');
+        const contextMeter = document.getElementById('contextMeter');
+        const contextMeterText = document.getElementById('contextMeterText');
+        const contextMeterFill = document.getElementById('contextMeterFill');
+
+        const state = {
+            format: localStorage.getItem('gemini_apiFormat') || 'openai',
+            baseUrl: localStorage.getItem('gemini_baseUrl') || '',
+            apiKey: localStorage.getItem('gemini_apiKey') || '',
+            selectedModel: localStorage.getItem('gemini_model') || '',
+            models: JSON.parse(localStorage.getItem('gemini_models') || '{}'),
+            messages: JSON.parse(localStorage.getItem('gemini_messages') || '[]'),
+            chats: JSON.parse(localStorage.getItem('gemini_chats') || '[]'),
+            activeChatId: localStorage.getItem('gemini_activeChatId') || ''
+        };
+
+        function makeChat(title='Новый чат') {
+            return { id: 'chat_' + Date.now() + '_' + Math.random().toString(36).slice(2,8), title, messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+        }
+        function ensureChatState() {
+            if (!Array.isArray(state.chats)) state.chats = [];
+            // Migrate the previous single-chat history into the first saved chat.
+            if (!state.chats.length && Array.isArray(state.messages) && state.messages.length) {
+                const migrated = makeChat();
+                migrated.messages = state.messages.slice();
+                const first = migrated.messages.find(m => m.role === 'user' && m.content);
+                if (first) migrated.title = String(first.content).trim().slice(0, 48) || 'Новый чат';
+                state.chats.push(migrated);
+                state.activeChatId = migrated.id;
+            }
+            let active = state.chats.find(c => c.id === state.activeChatId);
+            if (!active) {
+                active = state.chats[0] || makeChat();
+                if (!state.chats.includes(active)) state.chats.unshift(active);
+                state.activeChatId = active.id;
+            }
+            state.messages = Array.isArray(active.messages) ? active.messages : [];
+            saveState();
+        }
+        function activeChat() { return state.chats.find(c => c.id === state.activeChatId) || null; }
+        function syncActiveChat() {
+            const chat = activeChat();
+            if (!chat) return;
+            chat.messages = state.messages;
+            chat.updatedAt = Date.now();
+            const first = state.messages.find(m => m.role === 'user' && m.content);
+            if (first) chat.title = String(first.content).trim().replace(/\s+/g,' ').slice(0,48) || 'Новый чат';
+            saveState();
+            renderChatHistory();
+        }
+        function renderChatHistory() {
+            chatHistory.innerHTML = '';
+            const chats = [...state.chats].sort((a,b) => (b.updatedAt||0)-(a.updatedAt||0));
+            if (!chats.length) { chatHistory.innerHTML = '<div class="history-empty">Здесь появятся ваши разговоры.</div>'; return; }
+            chats.forEach(chat => {
+                const item = document.createElement('div');
+                item.className = 'history-item' + (chat.id === state.activeChatId ? ' active' : '');
+                item.tabIndex = 0;
+                const icon = document.createElement('svg'); icon.className='history-icon'; icon.setAttribute('viewBox','0 0 24 24'); icon.innerHTML='<path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>';
+                const text = document.createElement('div'); text.className='history-text';
+                const name=document.createElement('div'); name.className='history-name'; name.textContent=chat.title || 'Новый чат';
+                const meta=document.createElement('div'); meta.className='history-meta'; meta.textContent=`${(chat.messages||[]).length} сообщений`;
+                text.append(name,meta);
+                const del=document.createElement('button'); del.className='history-delete'; del.setAttribute('aria-label','Удалить чат'); del.innerHTML='<svg class="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9zm7.5-5-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+                del.addEventListener('click', e => { e.stopPropagation(); deleteChat(chat.id); });
+                item.append(icon,text,del);
+                item.addEventListener('click',()=>openChat(chat.id));
+                item.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openChat(chat.id);}});
+                chatHistory.appendChild(item);
+            });
+        }
+        function openChat(id) {
+            if (currentState === 'generating') return;
+            const chat=state.chats.find(c=>c.id===id); if(!chat)return;
+            state.activeChatId=id; state.messages=Array.isArray(chat.messages)?chat.messages:[]; saveState();
+            renderSavedMessages(); renderChatHistory(); closeDrawer();
+        }
+        function createNewChat() {
+            if (currentState === 'generating') return;
+            const chat=makeChat(); state.chats.unshift(chat); state.activeChatId=chat.id; state.messages=[]; saveState();
+            renderSavedMessages(); renderChatHistory(); closeDrawer();
+        }
+        function deleteChat(id) {
+            if (currentState === 'generating') return;
+            state.chats=state.chats.filter(c=>c.id!==id);
+            if (!state.chats.length) state.chats=[makeChat()];
+            if (!state.chats.some(c=>c.id===state.activeChatId)) state.activeChatId=state.chats[0].id;
+            state.messages=state.chats.find(c=>c.id===state.activeChatId).messages || [];
+            saveState(); renderSavedMessages(); renderChatHistory();
+        }
+        function renderSavedMessages() {
+            chatContainer.innerHTML='';
+            chatContainer.appendChild(loadingDots);
+            loadingDots.style.display='none'; loadingDots.classList.remove('hiding');
+            (state.messages||[]).forEach(m=>{
+                const wrap=document.createElement('div'); wrap.className='message '+(m.role==='user'?'user':'ai');
+                if(m.role==='user') {
+                    const displayText = typeof m.displayText === 'string' ? m.displayText : (typeof m.content === 'string' ? m.content : '');
+                    const savedAttachments = Array.isArray(m.attachments) ? m.attachments : [];
+                    if (savedAttachments.length) {
+                        wrap.classList.add('attachment-message');
+                        renderMessageAttachments(wrap, savedAttachments);
+                        if (displayText) {
+                            const caption=document.createElement('div');
+                            caption.className='message-caption';
+                            caption.textContent=displayText;
+                            wrap.appendChild(caption);
+                        }
+                    } else if (displayText) {
+                        const t=document.createElement('div'); t.textContent=displayText; wrap.appendChild(t);
+                    }
+                } else {
+                    const c=document.createElement('div'); c.className='ai-content'; c.innerHTML=renderMarkdown(m.content||''); wrap.appendChild(c);
+                }
+                chatContainer.insertBefore(wrap,loadingDots);
+            });
+            const hasMessages=(state.messages||[]).length>0;
+            isFirstMessage=!hasMessages;
+            welcomeScreen.classList.toggle('hidden',hasMessages);
+            chatContainer.scrollTop=chatContainer.scrollHeight;
+        }
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[ch]));
+        }
+
+        function getAttachmentExtension(name='') {
+            const clean = String(name).split(/[\\/]/).pop();
+            const dot = clean.lastIndexOf('.');
+            return dot > 0 ? clean.slice(dot + 1).toLowerCase() : '';
+        }
+
+        function formatAttachmentSize(size) {
+            const n = Number(size);
+            if (!Number.isFinite(n) || n < 0) return '';
+            if (n < 1024) return `${n} Б`;
+            if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} КБ`;
+            return `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} МБ`;
+        }
+
+        // Inline SVGs based on the Lucide visual language. Keeping them inline
+        // means the attachment UI also works completely offline in content:// pages.
+        function attachmentIconSvg(kind, ext) {
+            const code = ['html','htm','xml','svg','js','jsx','ts','tsx','css','scss','sass','less','py','rs','go','java','kt','kts','c','cc','cpp','h','hpp','sql','sh','bash','bat','ps1'].includes(ext);
+            const json = ['json','jsonc'].includes(ext);
+            const text = ['txt','md','log','csv','ini','conf','toml','yaml','yml'].includes(ext);
+            if (code) {
+                return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/></svg>';
+            }
+            if (json) {
+                return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/></svg>';
+            }
+            if (text || kind === 'text') {
+                return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M8 13h8"/><path d="M8 17h6"/></svg>';
+            }
+            if (['zip','rar','7z','tar','gz'].includes(ext)) {
+                return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V3h12z"/><path d="M15 3v5h6"/><path d="M8 7h4M8 11h4M8 15h4"/></svg>';
+            }
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/></svg>';
+        }
+
+        function renderMessageAttachments(container, attachments) {
+            if (!Array.isArray(attachments) || !attachments.length) return;
+            const box=document.createElement('div'); box.className='message-attachments';
+            attachments.forEach(a=>{
+                if (a.kind === 'image' && a.data) {
+                    const img=document.createElement('img');
+                    img.className='message-attachment-image';
+                    img.src=a.data;
+                    img.alt=a.name || 'Изображение';
+                    img.loading='lazy';
+                    img.addEventListener('click',()=>openImageLightbox(a.data));
+                    box.appendChild(img);
+                    return;
+                }
+
+                // Text/source files used to be sent to the model but skipped here.
+                // Render every non-image attachment so the user can always see
+                // exactly what was attached to this message.
+                const ext = getAttachmentExtension(a.name || '');
+                const file=document.createElement('div');
+                file.className='message-attachment-file';
+                file.title = a.mime || a.name || 'Прикреплённый файл';
+
+                const icon=document.createElement('span');
+                icon.className='attachment-file-icon';
+                icon.innerHTML=attachmentIconSvg(a.kind, ext);
+
+                const info=document.createElement('span');
+                info.className='attachment-file-info';
+                const name=document.createElement('span');
+                name.className='attachment-file-name';
+                name.textContent=a.name || 'Прикреплённый файл';
+                const meta=document.createElement('span');
+                meta.className='attachment-file-meta';
+                const typeLabel = ext ? ext.toUpperCase() : (a.mime || 'Файл');
+                const size = Number(a.size) || (a.kind === 'text' && typeof a.text === 'string' ? new Blob([a.text]).size : 0);
+                meta.textContent = [typeLabel, formatAttachmentSize(size)].filter(Boolean).join(' · ');
+                info.append(name,meta);
+                file.append(icon,info);
+                box.appendChild(file);
+            });
+            if (box.childElementCount) container.appendChild(box);
+        }
+        function openImageLightbox(src) {
+            lightboxImage.src=src;
+            imageLightbox.classList.add('open');
+            imageLightbox.setAttribute('aria-hidden','false');
+            document.body.style.overflow='hidden';
+        }
+        function closeImageLightbox() {
+            imageLightbox.classList.remove('open');
+            imageLightbox.setAttribute('aria-hidden','true');
+            document.body.style.overflow='hidden';
+            setTimeout(()=>{ if(!imageLightbox.classList.contains('open')) lightboxImage.src=''; },220);
+        }
+        lightboxClose.addEventListener('click', closeImageLightbox);
+        imageLightbox.addEventListener('click', e=>{ if(e.target===imageLightbox) closeImageLightbox(); });
+        document.addEventListener('keydown', e=>{ if(e.key==='Escape' && imageLightbox.classList.contains('open')) closeImageLightbox(); });
+
+        function openDrawer() { renderChatHistory(); drawer.classList.add('open'); drawerBackdrop.classList.add('open'); }
+        function closeDrawer() { drawer.classList.remove('open'); drawerBackdrop.classList.remove('open'); }
+
+        ensureChatState();
+
+        function keyFor(url, format=state.format) { return `${format}:${(url || '').replace(/\/+$/, '') || 'default'}`; }
+        function normalizeBase(url) {
+            let b = (url || '').trim().replace(/\/+$/, '');
+            if (b.endsWith('/v1')) b = b.slice(0, -3).replace(/\/+$/, '');
+            return b;
+        }
+        function api(path) {
+            const b = normalizeBase(state.baseUrl);
+            if (!b) throw new Error('Сначала укажи Base URL.');
+            return b + path;
+        }
+        function headers() {
+            if (state.format === 'anthropic') return {
+                'content-type': 'application/json',
+                'anthropic-version': '2023-06-01',
+                'x-api-key': state.apiKey
+            };
+            return {
+                'content-type': 'application/json',
+                'Authorization': `Bearer ${state.apiKey}`
+            };
+        }
+        function saveState() {
+            localStorage.setItem('gemini_apiFormat', state.format);
+            localStorage.setItem('gemini_baseUrl', state.baseUrl);
+            localStorage.setItem('gemini_apiKey', state.apiKey);
+            localStorage.setItem('gemini_model', state.selectedModel);
+            localStorage.setItem('gemini_models', JSON.stringify(state.models));
+            localStorage.setItem('gemini_messages', JSON.stringify(state.messages));
+            localStorage.setItem('gemini_chats', JSON.stringify(state.chats));
+            localStorage.setItem('gemini_activeChatId', state.activeChatId);
+        }
+        function updateFormatUI() {
+            formatOpenAI.checked = state.format === 'openai';
+            formatAnthropic.checked = state.format === 'anthropic';
+            if (state.format === 'anthropic') {
+                endpointHint.textContent = 'Запросы: /v1/models и /v1/messages';
+                settingsNote.textContent = 'Anthropic Messages API: POST /v1/messages с anthropic-version и x-api-key.';
+                baseUrlInput.placeholder = 'https://your-provider.example.com';
+                apiKeyInput.placeholder = 'sk-ant-…';
+                manualModelInput.placeholder = 'claude-sonnet-4-6';
+            } else {
+                endpointHint.textContent = 'Запросы: /v1/models и /v1/chat/completions';
+                settingsNote.textContent = 'OpenAI-compatible: POST /v1/chat/completions с Authorization: Bearer.';
+                baseUrlInput.placeholder = 'https://freeinference.org';
+                apiKeyInput.placeholder = 'your-api-key';
+                manualModelInput.placeholder = 'glm-5.1';
+            }
+        }
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function renderInlineMarkdown(text) {
+            let out = escapeHtml(text);
+            const codeParts = [];
+            out = out.replace(/`([^`\n]+)`/g, (_, code) => {
+                const token = `\u0000INLINE_CODE_${codeParts.length}\u0000`;
+                codeParts.push(`<code class="inline-code">${code}</code>`);
+                return token;
+            });
+            out = out
+                .replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/__([^_\n]+?)__/g, '<strong>$1</strong>')
+                .replace(/\*([^*\n]+?)\*/g, '<em>$1</em>')
+                .replace(/_([^_\n]+?)_/g, '<em>$1</em>');
+            out = out.replace(/\n/g, '<br>');
+            codeParts.forEach((html, i) => {
+                out = out.replace(`\u0000INLINE_CODE_${i}\u0000`, html);
+            });
+            return out;
+        }
+
+        function renderMarkdown(text) {
+            if (typeof text !== 'string') return '';
+
+            // Parse fenced blocks first so their contents are never interpreted as Markdown/HTML.
+            const fenceRe = /```([\w.+#-]*)[ \t]*\n?([\s\S]*?)```/g;
+            let html = '';
+            let cursor = 0;
+            let match;
+
+            while ((match = fenceRe.exec(text)) !== null) {
+                html += renderInlineMarkdown(text.slice(cursor, match.index));
+                const language = match[1] || 'code';
+                const code = match[2].replace(/^\n/, '').replace(/\n$/, '');
+                const encoded = escapeHtml(code);
+                html += `<div class="code-block" data-code="${escapeHtml(code)}">`
+                    + `<div class="code-block-header"><span class="code-language">${escapeHtml(language)}</span>`
+                    + `<button type="button" class="code-copy" data-copy-code="${encoded}">Копировать</button></div>`
+                    + `<pre class="code-pre"><code>${encoded}</code></pre></div>`;
+                cursor = fenceRe.lastIndex;
+            }
+
+            html += renderInlineMarkdown(text.slice(cursor));
+            return html;
+        }
+
+function stripThinking(text) {
+            if (typeof text !== 'string') return '';
+            // Models such as MiniMax/GLM may put hidden reasoning directly in
+            // the visible content as <think>...</think>. Never show or store it.
+            let clean = text.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, '');
+            // Be defensive about a malformed/incomplete thinking tag.
+            clean = clean.replace(/<think\b[^>]*>[\s\S]*$/i, '');
+            return clean.trim();
+        }
+
+        function responseText(data) {
+            let text = '';
+            if (state.format === 'anthropic') {
+                text = Array.isArray(data?.content)
+                    ? data.content.filter(x => x?.type === 'text').map(x => typeof x.text === 'string' ? x.text : '').join('\n')
+                    : (typeof data?.output_text === 'string' ? data.output_text : (typeof data?.completion === 'string' ? data.completion : ''));
+            } else {
+                const choices = Array.isArray(data?.choices) ? data.choices : [];
+                const parts = [];
+                for (const choice of choices) {
+                    const content = choice?.message?.content;
+                    if (typeof content === 'string') {
+                        parts.push(content);
+                    } else if (Array.isArray(content)) {
+                        parts.push(content.filter(x => x?.type === 'text').map(x => typeof x.text === 'string' ? x.text : '').join('\n'));
+                    }
+                    // Do NOT render reasoning_content: it is hidden reasoning, not the final answer.
+                }
+                text = parts.filter(Boolean).join('\n') || (typeof data?.output_text === 'string' ? data.output_text : '');
+            }
+            return stripThinking(text);
+        }
+
+        function generationParams(maxTokens=4096) {
+            const params = { max_tokens: maxTokens };
+            const model = String(state.selectedModel || '').toLowerCase();
+            // FreeInference documents GLM-5.3 / GLM-5.3-Flash as always-on reasoning
+            // models. With a tiny 512-token completion budget they can spend the whole
+            // budget reasoning and leave message.content empty. Keep reasoning low for
+            // normal chat while reserving enough completion budget for the final answer.
+            if (model === 'glm-5.3-flash' || model === 'glm-5.3') {
+                params.reasoning_effort = 'low';
+            }
+            return params;
+        }
+        const CONTEXT_DEFAULT_LIMIT = 32768;
+        const CONTEXT_SAFETY_MARGIN = 512;
+        const CONTEXT_MIN_RECENT = 4;
+
+        function currentModelMeta() {
+            const models = currentModels();
+            return models.find(m => m.id === state.selectedModel) || null;
+        }
+
+        function getContextLimit() {
+            const raw = currentModelMeta()?.raw || {};
+            const candidates = [
+                raw.context_length, raw.context_window, raw.max_context_length,
+                raw.max_input_tokens, raw.input_token_limit, raw.token_limit,
+                raw.limits?.context_length, raw.limits?.context_window,
+                raw.capabilities?.context_length
+            ];
+            for (const value of candidates) {
+                const n = Number(value);
+                if (Number.isFinite(n) && n >= 2048) return Math.floor(n);
+            }
+            return CONTEXT_DEFAULT_LIMIT;
+        }
+
+        function estimateTokens(value) {
+            if (value == null) return 0;
+            if (typeof value === 'string') return Math.ceil(value.length / 3.5);
+            if (Array.isArray(value)) return Math.ceil(JSON.stringify(value).length / 3.5);
+            if (typeof value === 'object') return Math.ceil(JSON.stringify(value).length / 3.5);
+            return Math.ceil(String(value).length / 3.5);
+        }
+
+        function estimateMessageTokens(message) {
+            if (!message) return 0;
+            // Do not count UI-only attachment metadata twice. `content` is the
+            // exact payload representation used by the API.
+            return estimateTokens(message.content) + 4;
+        }
+
+        function estimateMessagesTokens(messages) {
+            return (messages || []).reduce((sum, m) => sum + estimateMessageTokens(m), 0);
+        }
+
+        function compactOldMessages(messages, targetTokens) {
+            if (!messages.length) return [];
+            const kept = [];
+            let used = 0;
+            for (let i = messages.length - 1; i >= 0; i--) {
+                const cost = estimateMessageTokens(messages[i]);
+                if (kept.length >= CONTEXT_MIN_RECENT && used + cost > targetTokens) break;
+                if (used + cost > targetTokens && kept.length >= CONTEXT_MIN_RECENT) break;
+                kept.unshift(messages[i]);
+                used += cost;
+            }
+            // If a single huge attachment/message exceeds the budget, keep the
+            // newest message rather than silently sending an empty context.
+            if (!kept.length) kept.push(messages[messages.length - 1]);
+            return kept;
+        }
+
+        function formatTokens(n) {
+            return Number(n || 0).toLocaleString('ru-RU');
+        }
+
+        function updateContextMeter(used, limit, label='') {
+            if (!contextMeterText || !contextMeterFill) return;
+            const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+            contextMeterText.textContent = `${formatTokens(used)} / ${formatTokens(limit)} токенов${label ? ` · ${label}` : ''}`;
+            contextMeterFill.style.width = `${pct}%`;
+        }
+
+        function prepareContext(maxTokens=512) {
+            const source = Array.isArray(state.messages) ? state.messages : [];
+            const limit = getContextLimit();
+            // Leave room for the model's requested output plus a small safety
+            // margin. We only trim the oldest messages; the saved chat remains intact.
+            const budget = Math.max(1024, limit - Math.max(256, maxTokens) - CONTEXT_SAFETY_MARGIN);
+            const originalTokens = estimateMessagesTokens(source);
+            let messages = source;
+            let trimmed = false;
+            if (originalTokens > budget) {
+                messages = compactOldMessages(source, budget);
+                trimmed = messages.length !== source.length;
+            }
+            const used = estimateMessagesTokens(messages);
+            updateContextMeter(used, limit, trimmed ? `отправлено ${messages.length} из ${source.length}` : 'вся история');
+            return { messages, limit, used, budget, trimmed, originalTokens };
+        }
+
+        function chatPayload(userText, maxTokens=4096) {
+            const context = prepareContext(maxTokens);
+            return { model: state.selectedModel, messages: [...context.messages], ...generationParams(maxTokens) };
+        }
+        function setApiState(text, type='') {
+            apiState.textContent = text;
+            apiState.className = 'api-status' + (type ? ' ' + type : '');
+        }
+        function openSettings() {
+            baseUrlInput.value = state.baseUrl;
+            apiKeyInput.value = state.apiKey;
+            manualModelInput.value = state.selectedModel;
+            updateFormatUI();
+            settingsOverlay.classList.add('open');
+            settingsOverlay.setAttribute('aria-hidden', 'false');
+            setApiState('');
+            testAnswer.classList.remove('show');
+            updateContextMeter(estimateMessagesTokens(state.messages), getContextLimit());
+        }
+        function closeSettings() {
+            settingsOverlay.classList.remove('open');
+            settingsOverlay.setAttribute('aria-hidden', 'true');
+        }
+        function currentModels() {
+            return state.models[keyFor(state.baseUrl, state.format)] || [];
+        }
+
+        function renderModelMenu() {
+            const models = currentModels();
+            modelMenu.innerHTML = '';
+            modelMenu.classList.toggle('empty', models.length === 0);
+            models.forEach(model => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'model-option' + (model.id === state.selectedModel ? ' selected' : '');
+                btn.setAttribute('role', 'option');
+                btn.setAttribute('aria-selected', model.id === state.selectedModel ? 'true' : 'false');
+                const name = document.createElement('span');
+                name.textContent = model.name || model.id;
+                const id = document.createElement('small');
+                id.textContent = model.name && model.name !== model.id ? model.id : '';
+                id.style.cssText = 'display:block;color:#8b8f94;font-size:11px;margin-top:2px;';
+                const wrap = document.createElement('span');
+                wrap.append(name, id);
+                const check = document.createElement('span');
+                check.className = 'model-check';
+                check.textContent = '✓';
+                btn.append(wrap, check);
+                btn.addEventListener('click', () => {
+                    state.selectedModel = model.id;
+                    manualModelInput.value = model.id;
+                    saveState();
+                    renderModelLabel();
+                    closeModelMenu();
+                });
+                modelMenu.appendChild(btn);
+            });
+        }
+
+        function renderModelLabel() {
+            modelLabel.textContent = state.selectedModel || 'Gemini Pro';
+            const models = currentModels();
+            modelsStatus.textContent = models.length ? `Кэшировано моделей: ${models.length}` : 'Модели ещё не загружены';
+            renderModelMenu();
+        }
+
+        function openModelMenu() {
+            renderModelMenu();
+            modelMenu.classList.add('open');
+            modelSelector.classList.add('model-open');
+            modelSelector.setAttribute('aria-expanded', 'true');
+        }
+        function closeModelMenu() {
+            modelMenu.classList.remove('open');
+            modelSelector.classList.remove('model-open');
+            modelSelector.setAttribute('aria-expanded', 'false');
+        }
+        function toggleModelMenu() {
+            modelMenu.classList.contains('open') ? closeModelMenu() : openModelMenu();
+        }
+
+        async function refreshModels() {
+            state.baseUrl = normalizeBase(baseUrlInput.value);
+            state.apiKey = apiKeyInput.value.trim();
+            if (!state.baseUrl) { setApiState('Укажи Base URL.', 'error'); return; }
+            if (!state.apiKey) { setApiState('Укажи API Key.', 'error'); return; }
+            refreshModelsBtn.disabled = true;
+            setApiState('Загружаю модели…');
+            try {
+                const res = await fetch(api('/v1/models'), { headers: headers() });
+                const rawText = await res.text();
+                if (!res.ok) throw new Error(rawText.slice(0, 500) || `HTTP ${res.status}`);
+                const data = JSON.parse(rawText);
+                const raw = Array.isArray(data.data) ? data.data : (Array.isArray(data.models) ? data.models : []);
+                const models = raw.map(x => ({ id: x.id || x.name, name: x.display_name || x.name || x.id, raw: x })).filter(x => x.id);
+                state.models[keyFor(state.baseUrl, state.format)] = models;
+                if (!state.selectedModel && models[0]) state.selectedModel = models[0].id;
+                manualModelInput.value = state.selectedModel;
+                saveState();
+                renderModelLabel();
+                setApiState(`Готово. Загружено моделей: ${models.length}`, 'ok');
+            } catch (e) {
+                setApiState('Не удалось загрузить модели:\n' + e.message, 'error');
+            } finally {
+                refreshModelsBtn.disabled = false;
+            }
+        }
+
+        async function testApi() {
+            state.baseUrl = normalizeBase(baseUrlInput.value);
+            state.apiKey = apiKeyInput.value.trim();
+            const manual = manualModelInput.value.trim();
+            if (manual) state.selectedModel = manual;
+            saveState();
+            renderModelLabel();
+            if (!state.baseUrl || !state.apiKey || !state.selectedModel) {
+                setApiState('Для теста нужны Base URL, API Key и модель.', 'error');
+                return;
+            }
+            testApiBtn.disabled = true;
+            testAnswer.classList.remove('show');
+            setApiState('Отправляю тестовый запрос…');
+            try {
+                const endpoint = state.format === 'anthropic' ? '/v1/messages' : '/v1/chat/completions';
+                const res = await fetch(api(endpoint), {
+                    method: 'POST',
+                    headers: headers(),
+                    body: JSON.stringify(state.format === 'anthropic' ? { model: state.selectedModel, max_tokens: 64, messages: [{ role: 'user', content: testPromptInput.value.trim() || 'Привет' }] } : { model: state.selectedModel, max_tokens: 64, messages: [{ role: 'user', content: testPromptInput.value.trim() || 'Привет' }] })
+                });
+                const rawText = await res.text();
+                let data;
+                try { data = JSON.parse(rawText); } catch { data = null; }
+                if (!res.ok) {
+                    throw new Error(data?.error?.message || rawText.slice(0, 600) || `HTTP ${res.status}`);
+                }
+                const answer = responseText(data);
+                testAnswer.textContent = answer || 'OK';
+                testAnswer.classList.add('show');
+                setApiState('API отвечает нормально.', 'ok');
+            } catch (e) {
+                testAnswer.textContent = 'Ошибка: ' + e.message;
+                testAnswer.classList.add('show');
+                setApiState('Тест не прошёл.', 'error');
+            } finally {
+                testApiBtn.disabled = false;
+            }
+        }
+
+        hamburgerBtn.addEventListener('click', openDrawer);
+        settingsBtn.addEventListener('click', openSettings);
+        drawerClose.addEventListener('click', closeDrawer);
+        drawerBackdrop.addEventListener('click', closeDrawer);
+        newChatAction.addEventListener('click', createNewChat);
+        drawerSettings.addEventListener('click', () => { closeDrawer(); openSettings(); });
+        settingsClose.addEventListener('click', closeSettings);
+        settingsOverlay.addEventListener('click', e => { if (e.target === settingsOverlay) closeSettings(); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) closeSettings();
+            if (e.key === 'Escape' && drawer.classList.contains('open')) closeDrawer(); });
+        saveSettingsBtn.addEventListener('click', () => {
+            state.format = formatAnthropic.checked ? 'anthropic' : 'openai';
+            state.baseUrl = normalizeBase(baseUrlInput.value);
+            state.apiKey = apiKeyInput.value.trim();
+            const manual = manualModelInput.value.trim();
+            if (manual) state.selectedModel = manual;
+            saveState();
+            renderModelLabel();
+            setApiState('Настройки сохранены.', 'ok');
+        });
+        refreshModelsBtn.addEventListener('click', refreshModels);
+        testApiBtn.addEventListener('click', testApi);
+        modelSelector.addEventListener('click', toggleModelMenu);
+        modelSelector.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleModelMenu(); }
+            if (e.key === 'Escape') closeModelMenu();
+        });
+        document.addEventListener('click', e => {
+            if (!modelSelector.contains(e.target) && !modelMenu.contains(e.target)) closeModelMenu();
+        });
+        formatOpenAI.addEventListener('change', () => { state.format = 'openai'; updateFormatUI(); renderModelLabel(); });
+        formatAnthropic.addEventListener('change', () => { state.format = 'anthropic'; updateFormatUI(); renderModelLabel(); });
+        updateFormatUI();
+        renderModelLabel();
+        renderSavedMessages();
+        renderChatHistory();
+        updateContextMeter(estimateMessagesTokens(state.messages), getContextLimit());
+
+
+        /*
+         * Keyboard handling: NEVER move the header or welcome layer.
+         * Android/Chrome is configured with interactive-widget=overlays-content,
+         * so the IME overlays the app instead of shrinking/panning the document.
+         * Only the composer is lifted by --keyboard-height.
+         */
+        function syncViewport() {
+            const vv = window.visualViewport;
+            const layoutHeight = window.innerHeight;
+            const visualHeight = vv ? vv.height : layoutHeight;
+            const visualTop = vv ? (vv.offsetTop || 0) : 0;
+
+            // In Android Chrome with overlays-content the layout viewport keeps
+            // its full height while visualViewport becomes shorter. The footer
+            // must be positioned against the *bottom edge of the visible
+            // viewport*, not simply rely on CSS bottom:0.
+            const visualKeyboardHeight = vv
+                ? Math.max(0, Math.round(layoutHeight - visualHeight - visualTop))
+                : 0;
+
+            // Chromium's VirtualKeyboard API is the reliable fallback when
+            // interactive-widget=overlays-content keeps innerHeight unchanged.
+            // In that mode visualViewport may report no useful delta even
+            // though the IME is visibly covering the lower part of the page.
+            const vk = navigator.virtualKeyboard;
+            const apiKeyboardHeight = vk && vk.boundingRect
+                ? Math.max(0, Math.round(vk.boundingRect.height))
+                : 0;
+
+            const keyboardHeight = Math.max(visualKeyboardHeight, apiKeyboardHeight);
+
+            document.documentElement.style.setProperty('--keyboard-height', `${keyboardHeight}px`);
+            document.documentElement.style.setProperty('--composer-bottom', `${keyboardHeight}px`);
+            document.documentElement.style.setProperty('--footer-keyboard-shift', `${-keyboardHeight}px`);
+
+            // Move ONLY the welcome composition slightly upward while the IME
+            // is open. Header remains completely untouched at top:0.
+            const welcomeShift = keyboardHeight > 120 ? 120 : 0;
+            document.documentElement.style.setProperty('--welcome-keyboard-shift', `${welcomeShift}px`);
+
+            // Keep the document itself pinned at (0,0).
+            if (window.scrollX !== 0 || window.scrollY !== 0) {
+                window.scrollTo(0, 0);
+            }
+
+            // Measure the real composer height for the chat scroll area.
+            const footer = document.querySelector('footer');
+            if (footer) {
+                const footerHeight = footer.getBoundingClientRect().height;
+                document.documentElement.style.setProperty('--composer-height', `${Math.ceil(footerHeight)}px`);
+            }
+        }
+
+        syncViewport();
+        requestAnimationFrame(syncViewport);
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', syncViewport, { passive: true });
+            // Do NOT use visualViewport.scroll to reposition header/welcome.
+            // Chrome is free to report visual viewport movement; our fixed UI
+            // remains at CSS top:0 / top:50% regardless.
+        }
+
+        // Ask Chromium to expose the IME as an overlay and give us its exact
+        // bounding rectangle. This lets the composer sit immediately above
+        // the keyboard even when window.innerHeight does not resize.
+        if (navigator.virtualKeyboard) {
+            try {
+                navigator.virtualKeyboard.overlaysContent = true;
+                navigator.virtualKeyboard.addEventListener('geometrychange', syncViewport);
+            } catch (_) {}
+        }
+
+        window.addEventListener('resize', syncViewport, { passive: true });
+        window.addEventListener('orientationchange', () => setTimeout(syncViewport, 50));
+
+        input.addEventListener('focus', () => {
+            // Never call scrollIntoView/focus scrolling and never translate the
+            // app. Just recalculate the composer position after IME opens.
+            setTimeout(syncViewport, 0);
+            setTimeout(syncViewport, 150);
+            setTimeout(syncViewport, 350);
+        });
+
+        input.addEventListener('input', () => {
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (currentState !== 'generating') {
+                    sendMessage();
+                }
+            }
+        });
+
+        function closeAttachmentMenu() {
+            attachmentMenu.classList.remove('open');
+            attachmentMenu.setAttribute('aria-hidden', 'true');
+            attachBtn.setAttribute('aria-expanded', 'false');
+        }
+        function openAttachmentMenu() {
+            const r = attachBtn.getBoundingClientRect();
+            attachmentMenu.style.left = `${Math.max(8, r.left)}px`;
+            attachmentMenu.style.top = `${Math.max(8, r.top - 108)}px`;
+            attachmentMenu.classList.add('open');
+            attachmentMenu.setAttribute('aria-hidden', 'false');
+            attachBtn.setAttribute('aria-expanded', 'true');
+        }
+        function renderPendingAttachments() {
+            pendingAttachmentsEl.innerHTML = '';
+            pendingAttachments.forEach((a, i) => {
+                const chip = document.createElement('div'); chip.className='attachment-chip';
+                if (a.kind === 'image') { const img=document.createElement('img'); img.src=a.data; chip.appendChild(img); }
+                const name=document.createElement('span'); name.textContent=a.name; chip.appendChild(name);
+                const x=document.createElement('button'); x.className='remove'; x.type='button'; x.textContent='×';
+                x.onclick=()=>{ pendingAttachments.splice(i,1); renderPendingAttachments(); };
+                chip.appendChild(x); pendingAttachmentsEl.appendChild(chip);
+            });
+        }
+        function readFileAsDataURL(file) {
+            return new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(file); });
+        }
+        async function addFiles(files, forceImage=false) {
+            for (const file of Array.from(files)) {
+                if (file.size > 12 * 1024 * 1024) { alert(`Файл «${file.name}» слишком большой. Максимум 12 МБ.`); continue; }
+                const mime = file.type || 'application/octet-stream';
+                const isImage = mime.startsWith('image/') || forceImage;
+                try {
+                    if (isImage) {
+                        // Images are sent as base64, exactly as before.
+                        pendingAttachments.push({kind:'image', name:file.name, mime:mime || 'image/*', data:await readFileAsDataURL(file)});
+                    } else if (mime.startsWith('text/') || /\.(txt|md|json|csv|xml|html|js|css|kt|py|java|c|cpp|h|hpp|rs|go|ts|tsx|jsx|sql|sh|bat|yml|yaml|toml|ini|log)$/i.test(file.name)) {
+                        // Source/text files are included as their actual contents.
+                        const text = await file.text();
+                        pendingAttachments.push({kind:'text', name:file.name, mime:mime || 'text/plain', size:file.size, text:text.slice(0, 120000)});
+                    } else {
+                        // Binary files must not become a fake "[attached file]" marker.
+                        // Keep their bytes as a data URL so the request builder can send them.
+                        pendingAttachments.push({kind:'file', name:file.name, mime, size:file.size, data:await readFileAsDataURL(file)});
+                    }
+                } catch (err) {
+                    console.error('[Gemini client] attachment read failed', file.name, err);
+                    alert(`Не удалось прочитать файл «${file.name}».`);
+                }
+            }
+            renderPendingAttachments();
+        }
+        attachBtn.addEventListener('click', e => { e.stopPropagation(); attachmentMenu.classList.contains('open') ? closeAttachmentMenu() : openAttachmentMenu(); });
+        document.getElementById('pick-photo').addEventListener('click', ()=>{ closeAttachmentMenu(); photoInput.click(); });
+        document.getElementById('pick-file').addEventListener('click', ()=>{ closeAttachmentMenu(); fileInput.click(); });
+        photoInput.addEventListener('change', e=>{ addFiles(e.target.files, true); e.target.value=''; });
+        fileInput.addEventListener('change', e=>{ addFiles(e.target.files, false); e.target.value=''; });
+        document.addEventListener('click', e=>{ if (!attachmentMenu.contains(e.target) && e.target !== attachBtn) closeAttachmentMenu(); });
+
+        actionBtn.addEventListener('click', () => {
+            if (currentState !== 'generating') {
+                sendMessage();
+            }
+        });
+
+        function buildUserContent(text, attachments) {
+            if (!attachments.length) return text;
+            if (state.format === 'anthropic') {
+                const blocks=[];
+                if (text) blocks.push({type:'text', text});
+                attachments.forEach(a=>{
+                    if (a.kind === 'image' && a.data) {
+                        blocks.push({type:'image', source:{type:'base64', media_type:a.mime, data:a.data.split(',')[1] || a.data}});
+                    } else if (a.kind === 'text') {
+                        blocks.push({type:'text', text:`\n[Файл: ${a.name}]\n${a.text}`});
+                    } else if (a.kind === 'file' && a.data) {
+                        // Anthropic Messages supports PDFs as document blocks.
+                        if (a.mime === 'application/pdf') {
+                            blocks.push({type:'document', source:{type:'base64', media_type:a.mime, data:a.data.split(',')[1] || a.data}});
+                        } else {
+                            // For other binary files there is no universal Anthropic document block.
+                            // Send the actual base64 payload rather than pretending the file was sent.
+                            blocks.push({type:'text', text:`\n[Бинарный файл: ${a.name}, MIME: ${a.mime}, base64 ниже]\n${a.data.split(',')[1] || a.data}`});
+                        }
+                    }
+                });
+                return blocks;
+            }
+            const parts=[];
+            if (text) parts.push({type:'text', text});
+            attachments.forEach(a=>{
+                if (a.kind === 'image' && a.data) {
+                    parts.push({type:'image_url', image_url:{url:a.data}});
+                } else if (a.kind === 'text') {
+                    parts.push({type:'text', text:`\n[Файл: ${a.name}]\n${a.text}`});
+                } else if (a.kind === 'file' && a.data) {
+                    // OpenAI-compatible chat-completions providers that implement file parts
+                    // can consume this standard file shape. Providers that do not support it
+                    // will reject it instead of silently losing the attachment.
+                    parts.push({type:'file', file:{filename:a.name, file_data:a.data}});
+                }
+            });
+            return parts;
+        }
+
+        function sendMessage() {
+            const text = input.value.trim();
+            if (!text && !pendingAttachments.length) return;
+
+            if (isFirstMessage) {
+                welcomeScreen.classList.add('hidden');
+                isFirstMessage = false;
+            }
+
+            const userMsg = document.createElement('div');
+            userMsg.className = 'message user' + (pendingAttachments.length ? ' attachment-message' : '');
+
+            const attachmentsForMessage = pendingAttachments.slice();
+            if (attachmentsForMessage.length) {
+                renderMessageAttachments(userMsg, attachmentsForMessage);
+                if (text) {
+                    const caption=document.createElement('div');
+                    caption.className='message-caption';
+                    caption.textContent=text;
+                    userMsg.appendChild(caption);
+                }
+            } else if (text) {
+                const textEl=document.createElement('div');
+                textEl.textContent=text;
+                userMsg.appendChild(textEl);
+            }
+            chatContainer.insertBefore(userMsg, loadingDots);
+
+            pendingAttachments = [];
+            renderPendingAttachments();
+            input.value = '';
+            input.style.height = 'auto';
+
+            // Keep the complete conversation and send it on every request.
+            // This is the actual chat context, not just the latest prompt.
+            const apiContent = buildUserContent(text, attachmentsForMessage);
+            // Keep the API payload and the visual attachment metadata separately.
+            // The latter is persisted in the chat so image previews survive reloads.
+            state.messages.push({
+                role: 'user',
+                content: apiContent,
+                displayText: text,
+                attachments: attachmentsForMessage.map(a => ({
+                    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                    kind: a.kind,
+                    name: a.name,
+                    mime: a.mime,
+                    extension: getAttachmentExtension(a.name),
+                    data: a.kind !== 'text' ? a.data : undefined,
+                    text: a.kind === 'text' ? a.text : undefined,
+                    size: a.size || (a.kind === 'text' && typeof a.text === 'string' ? new Blob([a.text]).size : undefined)
+                }))
+            });
+            syncActiveChat();
+
+            // Sending releases focus so Android dismisses the keyboard.
+            // The welcome layer fades independently; it is not part of chat scroll.
+            input.blur();
+            if (navigator.virtualKeyboard && typeof navigator.virtualKeyboard.hide === 'function') {
+                try { navigator.virtualKeyboard.hide(); } catch (_) {}
+            }
+            if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                document.activeElement.blur();
+            }
+            setTimeout(syncViewport, 120);
+            setTimeout(syncViewport, 400);
+
+            currentState = 'generating';
+            actionBtn.classList.add('state-generating');
+            bgGlow.classList.remove('finished');
+            bgGlow.classList.add('generating');
+            
+            // Keep the animated dots visible for the ENTIRE generation phase.
+            // Thinking/reasoning blocks from models such as GLM are intentionally
+            // not rendered, so the dots are the visual indication that the model
+            // is still working. They disappear only after the final answer has
+            // been fully received and rendered.
+            loadingDots.style.display = 'flex';
+            loadingDots.classList.remove('hiding');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            // Start the real request immediately. Do not hide the dots while the
+            // model is thinking or producing hidden reasoning content.
+            startAiResponse(text);
+        }
+
+        function sanitizeMessageForApi(message, index = -1) {
+            if (!message || typeof message !== 'object') {
+                return { ok: false, reason: 'message is not an object', index };
+            }
+            const role = message.role;
+            if (!['user', 'assistant', 'system'].includes(role)) {
+                return { ok: false, reason: `unsupported role: ${String(role)}`, index };
+            }
+            const content = message.content;
+            if (typeof content === 'string') {
+                if (!content.trim() && role !== 'assistant') {
+                    return { ok: false, reason: 'empty content', index };
+                }
+                return { ok: true, message: { role, content } };
+            }
+            if (Array.isArray(content)) {
+                const blocks = [];
+                for (const block of content) {
+                    if (!block || typeof block !== 'object') continue;
+                    if (block.type === 'text' && typeof block.text === 'string') {
+                        blocks.push({ type: 'text', text: block.text });
+                    } else if (state.format !== 'anthropic' && block.type === 'image_url' && block.image_url && typeof block.image_url.url === 'string') {
+                        blocks.push({ type: 'image_url', image_url: { url: block.image_url.url } });
+                    } else if (state.format === 'anthropic' && block.type === 'image' && block.source && typeof block.source === 'object') {
+                        const source = block.source;
+                        if (source.type === 'base64' && typeof source.media_type === 'string' && typeof source.data === 'string') {
+                            blocks.push({ type: 'image', source: { type: 'base64', media_type: source.media_type, data: source.data } });
+                        }
+                    } else if (state.format === 'anthropic' && block.type === 'document' && block.source && typeof block.source === 'object') {
+                        const source = block.source;
+                        if (source.type === 'base64' && typeof source.media_type === 'string' && typeof source.data === 'string') {
+                            blocks.push({ type: 'document', source: { type: 'base64', media_type: source.media_type, data: source.data } });
+                        }
+                    } else if (state.format !== 'anthropic' && block.type === 'file' && block.file && typeof block.file === 'object') {
+                        if (typeof block.file.filename === 'string' && typeof block.file.file_data === 'string') {
+                            blocks.push({ type: 'file', file: { filename: block.file.filename, file_data: block.file.file_data } });
+                        }
+                    }
+                }
+                if (blocks.length) return { ok: true, message: { role, content: blocks } };
+                return { ok: false, reason: 'content array contains no supported blocks', index };
+            }
+            return { ok: false, reason: `unsupported content type: ${typeof content}`, index };
+        }
+
+        function sanitizeMessagesForApi(messages) {
+            const clean = [];
+            const invalid = [];
+            (Array.isArray(messages) ? messages : []).forEach((message, index) => {
+                const result = sanitizeMessageForApi(message, index);
+                if (result.ok) clean.push(result.message);
+                else invalid.push({ index, reason: result.reason });
+            });
+            return { messages: clean, invalid };
+        }
+
+        function uniqueTailCandidates(messages) {
+            const list = Array.isArray(messages) ? messages : [];
+            const sizes = [];
+            if (list.length) sizes.push(list.length);
+            [32, 16, 8, 4, 2, 1].forEach(n => {
+                if (list.length >= n && !sizes.includes(n)) sizes.push(n);
+            });
+            return sizes.map(n => list.slice(-n));
+        }
+
+        function isRetryableApiStatus(status) {
+            return status === 400 || status === 413 || status === 422 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+        }
+
+        async function requestWithContextRecovery(endpoint, basePayload, contextMessages) {
+            const candidates = uniqueTailCandidates(contextMessages);
+            let lastError = null;
+            for (let attempt = 0; attempt < candidates.length; attempt++) {
+                const candidate = candidates[attempt];
+                const payload = { ...basePayload, messages: candidate };
+                console.info('[Gemini client] API attempt', {
+                    attempt: attempt + 1,
+                    totalAttempts: candidates.length,
+                    messageCount: candidate.length,
+                    originalContextMessages: contextMessages.length,
+                    firstIncludedIndex: Math.max(0, contextMessages.length - candidate.length),
+                    estimatedTokens: estimateMessagesTokens(candidate)
+                });
+                try {
+                    const res = await fetch(api(endpoint), {
+                        method: 'POST',
+                        headers: headers(),
+                        body: JSON.stringify(payload)
+                    });
+                    const raw = await res.text();
+                    let data; try { data = JSON.parse(raw); } catch { data = null; }
+                    if (res.ok) {
+                        return { res, raw, data, payload, attempt: attempt + 1 };
+                    }
+                    const message = data?.error?.message || raw.slice(0, 600) || `HTTP ${res.status}`;
+                    lastError = new Error(message);
+                    lastError.status = res.status;
+                    console.warn('[Gemini client] API attempt failed', {
+                        attempt: attempt + 1,
+                        status: res.status,
+                        messageCount: candidate.length,
+                        error: message
+                    });
+                    if (!isRetryableApiStatus(res.status)) throw lastError;
+                } catch (e) {
+                    lastError = e;
+                    const status = Number(e?.status || 0);
+                    if (status && !isRetryableApiStatus(status)) throw e;
+                    if (!status && e?.name === 'TypeError') {
+                        // Network/CORS failures are not caused by old chat context.
+                        throw e;
+                    }
+                }
+            }
+            throw lastError || new Error('Не удалось получить ответ от API.');
+        }
+
+        async function startAiResponse(userText) {
+            const aiMsgWrapper = document.createElement('div');
+            aiMsgWrapper.className = 'message ai';
+            
+            const aiContent = document.createElement('div');
+            aiContent.className = 'ai-content';
+            aiMsgWrapper.appendChild(aiContent);
+            
+            chatContainer.insertBefore(aiMsgWrapper, loadingDots);
+            
+            let fullText = '';
+            try {
+                if (!state.baseUrl || !state.apiKey || !state.selectedModel) {
+                    throw new Error('Не настроены Base URL, API Key или модель. Открой Настройки API и проверь параметры.');
+                }
+                const requestedMaxTokens = 4096;
+                const context = prepareContext(requestedMaxTokens);
+                const sanitized = sanitizeMessagesForApi(context.messages);
+                if (!sanitized.messages.length) {
+                    throw new Error('После проверки истории не осталось ни одного корректного сообщения для API.');
+                }
+                const endpoint = state.format === 'anthropic' ? '/v1/messages' : '/v1/chat/completions';
+                const basePayload = { model: state.selectedModel, ...generationParams(requestedMaxTokens) };
+
+                console.info('[Gemini client] API request prepared', {
+                    model: state.selectedModel,
+                    format: state.format,
+                    endpoint,
+                    sourceMessageCount: state.messages.length,
+                    contextMessageCount: context.messages.length,
+                    sanitizedMessageCount: sanitized.messages.length,
+                    invalidMessages: sanitized.invalid,
+                    estimatedTokens: estimateMessagesTokens(sanitized.messages),
+                    contextLimit: context.limit,
+                    trimmed: context.trimmed,
+                    maxTokens: basePayload.max_tokens,
+                    reasoningEffort: basePayload.reasoning_effort || null
+                });
+
+                const result = await requestWithContextRecovery(endpoint, basePayload, sanitized.messages);
+                const { res, data, payload, attempt } = result;
+
+                const firstChoice = Array.isArray(data?.choices) ? data.choices[0] : null;
+                console.info('[Gemini client] API response', {
+                    status: res.status,
+                    successfulAttempt: attempt,
+                    finishReason: firstChoice?.finish_reason ?? null,
+                    choiceMessageKeys: firstChoice?.message && typeof firstChoice.message === 'object' ? Object.keys(firstChoice.message) : [],
+                    contentType: Array.isArray(firstChoice?.message?.content) ? 'array' : typeof firstChoice?.message?.content,
+                    contentLength: typeof firstChoice?.message?.content === 'string' ? firstChoice.message.content.length : null,
+                    reasoningLength: typeof firstChoice?.message?.reasoning_content === 'string' ? firstChoice.message.reasoning_content.length : null,
+                    usage: data?.usage || null,
+                    sentMessageCount: payload.messages.length
+                });
+
+                const answer = stripThinking(responseText(data));
+                if (!answer) {
+                    const finish = firstChoice?.finish_reason;
+                    const reasoningLength = typeof firstChoice?.message?.reasoning_content === 'string' ? firstChoice.message.reasoning_content.length : 0;
+                    if (reasoningLength > 0 || finish === 'length') {
+                        throw new Error(`Модель израсходовала лимит генерации на reasoning и не успела вернуть финальный ответ (max_tokens=${payload.max_tokens}).`);
+                    }
+                    throw new Error('API вернул успешный ответ без финального текста. Проверь формат ответа провайдера.');
+                }
+                fullText = answer;
+                state.messages.push({ role: 'assistant', content: answer });
+                syncActiveChat();
+                updateContextMeter(estimateMessagesTokens(state.messages), getContextLimit(), attempt > 1 ? `контекст восстановлен: попытка ${attempt}` : 'после ответа');
+            } catch (e) {
+                console.error('[Gemini client] API request failed', e);
+                const status = e?.status ? `HTTP ${e.status}: ` : '';
+                fullText = 'Ошибка API. Запрос не был успешно обработан.\n\n' + status + e.message;
+            }
+            let index = 0;
+            
+            // The API response is already received in full here. The previous
+            // 50ms-per-character loop made every answer feel artificially slow.
+            // Keep a subtle streaming effect, but render a much larger chunk
+            // every frame so normal responses appear almost immediately.
+            let dotsDismissed = false;
+            const typeInterval = setInterval(() => {
+                const remaining = fullText.length - index;
+                const chunkSize = remaining > 240 ? 10 : remaining > 100 ? 7 : 5;
+                const chunk = fullText.slice(index, index + chunkSize);
+
+                // The moment the first real character of the final answer is
+                // rendered, the thinking indicator has done its job. Start its
+                // existing short fade immediately instead of keeping the dots
+                // underneath the already-visible answer.
+                if (!dotsDismissed && chunk.length > 0) {
+                    dotsDismissed = true;
+                    loadingDots.classList.add('hiding');
+                    setTimeout(() => {
+                        loadingDots.style.display = 'none';
+                    }, 220);
+                }
+
+                aiContent.innerHTML = renderMarkdown((aiContent.dataset.raw || '') + chunk);
+                aiContent.dataset.raw = (aiContent.dataset.raw || '') + chunk;
+                index += chunk.length;
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+
+                if (index >= fullText.length) {
+                    clearInterval(typeInterval);
+                    finishAiResponse(aiMsgWrapper, true);
+                }
+            }, 8);
+        }
+
+        function finishAiResponse(aiMsgWrapper, dotsAlreadyDismissed = false) {
+            // Response action buttons and the old Gemini disclaimer are intentionally
+            // removed. The assistant message should stay visually clean and provider-neutral.
+
+            // If this response was rendered from the first character onward,
+            // the dots were already dismissed at the first visible character.
+            // Keep this fallback for empty/error responses so the indicator can
+            // never remain stuck on screen.
+            if (!dotsAlreadyDismissed) {
+                loadingDots.classList.add('hiding');
+                setTimeout(() => {
+                    loadingDots.style.display = 'none';
+                }, 220);
+            }
+            
+            currentState = 'idle';
+            actionBtn.classList.remove('state-generating');
+            // Finish the glow on a clean rendered frame. Removing the pulsing
+            // animation first and forcing reflow prevents its animated opacity
+            // from being replaced by opacity:0 in the same frame. The finished
+            // class then performs a genuine, uninterrupted 2-second fade-out.
+            bgGlow.classList.remove('generating');
+            bgGlow.classList.remove('finished');
+            void bgGlow.offsetWidth;
+            requestAnimationFrame(() => {
+                bgGlow.classList.add('finished');
+            });
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+    </script>
+<script>
+/*
+ * Keyboard autoscroll only. The existing v13 viewport/composer implementation
+ * stays untouched; this script only re-anchors #chat-container to its real
+ * scroll bottom after Android changes the visual viewport.
+ */
+(function () {
+    const chat = document.getElementById('chat-container');
+    const input = document.getElementById('chat-input');
+    if (!chat) return;
+
+    let keepBottom = true;
+    let timers = [];
+    let raf1 = 0;
+    let raf2 = 0;
+
+    function distanceFromBottom() {
+        return Math.max(0, chat.scrollHeight - chat.scrollTop - chat.clientHeight);
+    }
+
+    function scrollBottom(behavior = 'auto') {
+        const top = Math.max(0, chat.scrollHeight - chat.clientHeight);
+        chat.scrollTo({ top, behavior });
+    }
+
+    function rememberPosition() {
+        keepBottom = distanceFromBottom() <= 180;
+    }
+
+    function scheduleKeyboardBottom() {
+        if (!keepBottom) return;
+
+        cancelAnimationFrame(raf1);
+        cancelAnimationFrame(raf2);
+        timers.forEach(clearTimeout);
+
+        // One pass before layout settles, then two consecutive frames after it.
+        raf1 = requestAnimationFrame(() => {
+            if (!keepBottom) return;
+            scrollBottom('auto');
+            raf2 = requestAnimationFrame(() => {
+                if (!keepBottom) return;
+                scrollBottom('auto');
+            });
+        });
+
+        // Android can update the visual viewport in several steps during the IME animation.
+        timers = [80, 160, 260, 380, 520, 650].map(ms =>
+            setTimeout(() => {
+                if (keepBottom) scrollBottom('auto');
+            }, ms)
+        );
+    }
+
+    // If the user deliberately scrolls away from the newest messages, don't hijack it.
+    chat.addEventListener('scroll', () => {
+        keepBottom = distanceFromBottom() <= 180;
+    }, { passive: true });
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            scheduleKeyboardBottom();
+        }, { passive: true });
+    }
+
+    window.addEventListener('resize', scheduleKeyboardBottom, { passive: true });
+
+    if (input) {
+        input.addEventListener('focus', () => {
+            rememberPosition();
+            scheduleKeyboardBottom();
+        }, { passive: true });
+    }
+
+    document.addEventListener('focusin', e => {
+        if (e.target && (e.target.matches('textarea, input') || e.target.closest('.input-pill'))) {
+            rememberPosition();
+            scheduleKeyboardBottom();
+        }
+    }, { passive: true });
+
+    // When a new message changes scrollHeight, keep the newest content visible if we were at bottom.
+    const observer = new MutationObserver(() => {
+        if (keepBottom) scheduleKeyboardBottom();
+    });
+    observer.observe(chat, { childList: true, subtree: true, characterData: true });
+})();
+</script>
+
+</body>
+</html>

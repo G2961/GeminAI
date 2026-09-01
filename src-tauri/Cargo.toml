@@ -1,0 +1,21 @@
+[package]
+name = "gemini_tauri_client"
+version = "1.0.0"
+description = "Gemini-style AI chat client"
+authors = ["local"]
+edition = "2021"
+
+[lib]
+name = "gemini_tauri_client_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+default = ["custom-protocol"]
