@@ -1330,9 +1330,6 @@
             welcomeScreen.classList.toggle('hidden',hasMessages);
             chatContainer.scrollTop=chatContainer.scrollHeight;
         }
-        function escapeHtml(value) {
-            return String(value ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[ch]));
-        }
 
         function getAttachmentExtension(name='') {
             const clean = String(name).split(/[\\/]/).pop();
