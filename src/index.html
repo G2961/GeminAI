@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=overlays-content">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=overlays-content, viewport-fit=cover">
 <title>Gemini</title>
 <style>
     :root {
@@ -84,7 +84,8 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 16px 20px;
+        box-sizing: border-box;
+        padding: calc(16px + env(safe-area-inset-top)) 20px 16px;
         z-index: 10;
         position: relative;
         flex-shrink: 0;
@@ -704,7 +705,8 @@
         right: 0;
         height: var(--header-height);
         min-height: var(--header-height);
-        padding: 16px 20px;
+        box-sizing: border-box;
+        padding: calc(16px + env(safe-area-inset-top)) 20px 16px;
         z-index: 1000;
         flex: none;
         background: #000000;
@@ -1856,7 +1858,7 @@ function stripThinking(text) {
 
         /*
          * Keyboard handling: NEVER move the header or welcome layer.
-         * Android/Chrome is configured with interactive-widget=overlays-content,
+         * Android/Chrome is configured with interactive-widget=overlays-content, viewport-fit=cover,
          * so the IME overlays the app instead of shrinking/panning the document.
          * Only the composer is lifted by --keyboard-height.
          */
@@ -1875,7 +1877,7 @@ function stripThinking(text) {
                 : 0;
 
             // Chromium's VirtualKeyboard API is the reliable fallback when
-            // interactive-widget=overlays-content keeps innerHeight unchanged.
+            // interactive-widget=overlays-content, viewport-fit=cover keeps innerHeight unchanged.
             // In that mode visualViewport may report no useful delta even
             // though the IME is visibly covering the lower part of the page.
             const vk = navigator.virtualKeyboard;
